@@ -1,3 +1,4 @@
+#! python 3.7
 # check website sitemap for 200, 404, 410, 500-599 responses; output to txt file
 
 import requests
@@ -17,15 +18,21 @@ desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML
                  'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
                  'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
                  'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
+# https://kirill-sklyarenko.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
-
-def inputurl():
-    sitemap = input("paste xml sitemap link:")
-    assert sitemap.startswith("http") and sitemap.endswith("=xml"), "not a valid xml link"
+def inputurl() -> str:
+    """asks for sitemap link and asserts to variable"""
+    try:
+        sitemap = input("paste xml sitemap link:")
+        assert sitemap.startswith("http") and sitemap.endswith("=xml")
+    except AssertionError:
+        print("not a valid xml link")
+        inputurl()
     return sitemap
 
 
-def sitemaplist(url):
+def sitemaplist(url: str) -> list:
+    """goes to sitemap page and creates list of its links"""
     links = []
     pagetext = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
     while pagetext.status_code != 200:
@@ -50,7 +57,11 @@ def sitemaplist(url):
         print("list of sitemap urls is empty. The xml link must be wrong.")
 
 
-def checker(url):
+def checker(url: str) -> tuple:
+    """
+    follows each link in sitemap list
+    and appends to relevant list subject to response
+    """
     f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
     status = f.status_code
     if status == 200:
@@ -61,7 +72,6 @@ def checker(url):
         list410.append(url)
     elif 500 <= status <= 599:
         server_errors.append(url)
-    # print("checked: ", index, " links in", len(list), end="\r")
     return (list200, list404, list410, server_errors)
 
 
@@ -75,7 +85,7 @@ def threads(urls):
         process.join()
 
 
-def results(fourlists):
+def results(fourlists: tuple) -> None:
     
     if fourlists[0]:
         print(f"found {str(len(fourlists[0]))} good ")
