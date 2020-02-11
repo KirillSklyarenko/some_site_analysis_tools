@@ -4,9 +4,24 @@
 import requests
 from bs4 import BeautifulSoup
 import random
-# import logging
+import logging
 from threading import Thread
 import sys
+from typing import Tuple
+
+
+log_format = '%(filename)s - %(levelname)s - %(message)s'
+logger = logging.getLogger(__name__)
+logger.setLevel('DEBUG')
+stream = logging.StreamHandler()
+formatter = logging.Formatter(log_format)
+stream.setFormatter(formatter)
+logger.addHandler(stream)
+
+list200 = []
+list404 = []
+list410 = []
+server_errors = []
 
 desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
                  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
@@ -20,13 +35,14 @@ desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML
                  'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
 # https://kirill-sklyarenko.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
+
 def inputurl() -> str:
     """asks for sitemap link and asserts to variable"""
     try:
         sitemap = input("paste xml sitemap link:")
         assert sitemap.startswith("http") and sitemap.endswith("=xml")
     except AssertionError:
-        print("not a valid xml link")
+        logger.info("not a valid xml link")
         inputurl()
     return sitemap
 
@@ -36,30 +52,32 @@ def sitemaplist(url: str) -> list:
     links = []
     pagetext = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
     while pagetext.status_code != 200:
-        print(f"sitemap xml url was not reached. Status code {pagetext.status_code}")
-        tryagainquestion = input("try another xml link? y or n:")
+        logger.info(f"sitemap xml url was not reached. Status code {pagetext.status_code}")
+        tryagainquestion = input("try again? \"y\" for new url, \"n\" to exit or \"r\" to repeat:")
         if tryagainquestion.lower() == "y":
             inputurl()
         elif tryagainquestion.lower() == "n":
-            print("let's close")
+            logger.info("let's close")
             sys.exit()
+        elif tryagainquestion.lower() == "r":
+            sitemaplist(url)
         else:
-            print("please insert y or n")
+            logger.info("please insert y, n or r")
     data = pagetext.text
     soup = BeautifulSoup(data, 'xml')
     for i in soup.find_all('url'):
         link = i.findNext("loc").text
         links.append(link)
-    print("The number of url tags in sitemap: ", len(links))
+    logger.info(f"The number of url tags in sitemap: {len(links)}")
     if links:
         return links
     else:
-        print("list of sitemap urls is empty. The xml link must be wrong.")
+        logger.info("list of sitemap urls is empty. The xml link must be wrong.")
 
 
-def checker(url: str) -> tuple:
+def checker(url: str) -> Tuple[list, list, list, list]:
     """
-    follows each link in sitemap list
+    follows a provided link
     and appends to relevant list subject to response
     """
     f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
@@ -75,7 +93,7 @@ def checker(url: str) -> tuple:
     return (list200, list404, list410, server_errors)
 
 
-def threads(urls):
+def threads(urls: str) -> None:
     threads = []
     for i in urls:
         process = Thread(target=checker, args=[i])
@@ -86,45 +104,46 @@ def threads(urls):
 
 
 def results(fourlists: tuple) -> None:
-    
+    """
+    accepts lists with response urls, shows count
+    writes to txt file in the same folder
+    """
     if fourlists[0]:
-        print(f"found {str(len(fourlists[0]))} good ")
-        print("list of links sent to good links.txt")
+        logger.info(f"found {str(len(fourlists[0]))} good ")
+        logger.info("list of links sent to good links.txt")
         with open("good links.txt", "w") as f:
             f.write("\r".join(fourlists[0]))
     else:
-        print("no 200 pages found")
+        logger.info("no 200 pages found")
 
     if fourlists[1]:
-        print(f"found {str(len(fourlists[1]))} 404 ")
-        print("list of links sent to 404 links.txt")
+        logger.info(f"found {str(len(fourlists[1]))} 404 ")
+        logger.info("list of links sent to 404 links.txt")
         with open("404 links.txt", "w") as f:
             f.write("\r".join(fourlists[1]))
     else:
-        print("no 404 pages found")
+        logger.info("no 404 pages found")
 
     if fourlists[2]:
-        print(f"found {str(len(fourlists[2]))} 410 ")
-        print("list of links sent to 410 links.txt")
+        logger.info(f"found {str(len(fourlists[2]))} 410 ")
+        logger.info("list of links sent to 410 links.txt")
         with open("410 links.txt", "w") as f:
             f.write("\r".join(fourlists[2]))
     else:
-        print("no 410 pages found")
+        logger.info("no 410 pages found")
 
     if fourlists[3]:
-        print(f"found {str(len(fourlists[3]))} server error(s) ")
-        print("list of links sent to server error links.txt")
+        logger.info(f"found {str(len(fourlists[3]))} server error(s) ")
+        logger.info("list of links sent to server error links.txt")
         with open("server error links.txt", "w") as f:
             f.write("\r".join(fourlists[3]))
     else:
-        print("no server errors found")
+        logger.info("no server errors found")
 
-
-if __name__ == '__main__':
-    list200 = []
-    list404 = []
-    list410 = []
-    server_errors = []
+def main():
     sitemap = sitemaplist(inputurl())
     threads(sitemap)
     results((list200, list404, list410, server_errors))
+
+if __name__ == '__main__':
+    main()
