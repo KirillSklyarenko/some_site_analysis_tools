@@ -1,4 +1,3 @@
-#! python 3.7
 # check website sitemap for 200, 404, 410, 500-599 responses; output to txt file
 
 import requests
@@ -8,7 +7,7 @@ import logging
 from threading import Thread
 import sys
 from typing import Tuple
-
+import queue
 
 log_format = '%(filename)s - %(levelname)s - %(message)s'
 logger = logging.getLogger(__name__)
@@ -34,7 +33,7 @@ desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML
                  'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
                  'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
 # https://kirill-sklyarenko.ru/index.php?option=com_jmap&view=sitemap&format=xml
-
+# https://perevodzakonov.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
 def inputurl() -> str:
     """asks for sitemap link and asserts to variable"""
@@ -43,7 +42,7 @@ def inputurl() -> str:
         assert sitemap.startswith("http") and sitemap.endswith("=xml")
     except AssertionError:
         logger.info("not a valid xml link")
-        inputurl()
+        sitemap = inputurl()
     return sitemap
 
 
@@ -93,14 +92,26 @@ def checker(url: str) -> Tuple[list, list, list, list]:
     return (list200, list404, list410, server_errors)
 
 
-def threads(urls: str) -> None:
+def wrapper_checker(checker, q):
+    while not q.empty():
+        work = q.get()
+        checker(work)
+        q.task_done()
+
+
+def threads(urls: list) -> None:
+    q = queue.Queue()
     threads = []
     for i in urls:
-        process = Thread(target=checker, args=[i])
-        process.start()
-        threads.append(process)
-    for process in threads:
-        process.join()
+        q.put(i)
+    num_threads = min(40, len(urls))
+    logger.info(f"number of link packages: {num_threads}")
+    for i in enumerate(range(num_threads), 1):
+        logger.info(f"starting package {i[0]}")
+        t = Thread(target=wrapper_checker, args=(checker, q))
+        t.start()
+        threads.append(t)
+    q.join()
 
 
 def results(fourlists: tuple) -> None:
@@ -140,10 +151,12 @@ def results(fourlists: tuple) -> None:
     else:
         logger.info("no server errors found")
 
+
 def main():
     sitemap = sitemaplist(inputurl())
     threads(sitemap)
     results((list200, list404, list410, server_errors))
+
 
 if __name__ == '__main__':
     main()
