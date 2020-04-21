@@ -23,26 +23,36 @@ list410 = []
 server_errors = []
 
 desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
-                 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
-                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
-                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1) AppleWebKit/602.2.14 (KHTML, like Gecko) Version/10.0.1 Safari/602.2.14',
-                 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
-                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.98 Safari/537.36',
-                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.98 Safari/537.36',
-                 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
-                 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
-                 'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
+                  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
+                  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1) AppleWebKit/602.2.14 (KHTML, like Gecko) Version/10.0.1 Safari/602.2.14',
+                  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
+                  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.98 Safari/537.36',
+                  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.98 Safari/537.36',
+                  'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
+                  'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
+                  'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
 # https://kirill-sklyarenko.ru/index.php?option=com_jmap&view=sitemap&format=xml
 # https://perevodzakonov.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
-def inputurl() -> str:
-    """asks for sitemap link and asserts to variable"""
-    try:
-        sitemap = input("paste xml sitemap link:")
-        assert sitemap.startswith("http") and sitemap.endswith("=xml")
-    except AssertionError:
-        logger.info("not a valid xml link")
-        sitemap = inputurl()
+
+def sitemapurl(sitemap) -> str:
+    """asks for sitemap link and prevents apparently incorrect strings"""
+    while not sitemap:
+        entered_input = input("paste an xml sitemap link or 'e' to exit:")
+        if entered_input == 'e':
+            sys.exit()
+        else:
+            status = 0
+            if entered_input.startswith("http") and entered_input.endswith("=xml"):
+                f = requests.get(entered_input, headers={'User-Agent': random.choice(desktop_agents)}, timeout=(2, 5))
+                status = f.status_code
+                if status == 200:
+                    sitemap = entered_input
+                else:
+                    logger.info("link not reachable")
+            else:
+                logger.info("not a valid xml link")
     return sitemap
 
 
@@ -54,7 +64,7 @@ def sitemaplist(url: str) -> list:
         logger.info(f"sitemap xml url was not reached. Status code {pagetext.status_code}")
         tryagainquestion = input("try again? \"y\" for new url, \"n\" to exit or \"r\" to repeat:")
         if tryagainquestion.lower() == "y":
-            inputurl()
+            sitemapurl()
         elif tryagainquestion.lower() == "n":
             logger.info("let's close")
             sys.exit()
@@ -153,7 +163,7 @@ def results(fourlists: tuple) -> None:
 
 
 def main():
-    sitemap = sitemaplist(inputurl())
+    sitemap = sitemaplist(sitemapurl())
     threads(sitemap)
     results((list200, list404, list410, server_errors))
 
