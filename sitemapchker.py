@@ -1,13 +1,14 @@
 # check website sitemap for 200, 404, 410, 500-599 responses; output to txt file
 
-import requests
-from bs4 import BeautifulSoup
 import random
 import logging
 from threading import Thread
 import sys
-from typing import Tuple
+from typing import List
 import queue
+
+import requests
+from bs4 import BeautifulSoup
 
 log_format = '%(filename)s - %(levelname)s - %(message)s'
 logger = logging.getLogger(__name__)
@@ -17,10 +18,6 @@ formatter = logging.Formatter(log_format)
 stream.setFormatter(formatter)
 logger.addHandler(stream)
 
-list200 = []
-list404 = []
-list410 = []
-server_errors = []
 
 desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
                   'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
@@ -36,11 +33,12 @@ desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML
 # https://perevodzakonov.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
 
-def sitemapurl(sitemap) -> str:
+def sitemapurl() -> str:
     """asks for sitemap link and prevents apparently incorrect strings"""
+    sitemap = False
     while not sitemap:
         entered_input = input("paste an xml sitemap link or 'e' to exit:")
-        if entered_input == 'e':
+        if entered_input.lower() == 'e':
             sys.exit()
         else:
             status = 0
@@ -48,58 +46,37 @@ def sitemapurl(sitemap) -> str:
                 f = requests.get(entered_input, headers={'User-Agent': random.choice(desktop_agents)}, timeout=(2, 5))
                 status = f.status_code
                 if status == 200:
-                    sitemap = entered_input
+                    sitemap = f
                 else:
                     logger.info("link not reachable")
             else:
                 logger.info("not a valid xml link")
-    return sitemap
+    return sitemap.text
 
 
-def sitemaplist(url: str) -> list:
-    """goes to sitemap page and creates list of its links"""
+def sitemaplist(content: str) -> List:
+    """goes to sitemap page and creates a list of its links"""
     links = []
-    pagetext = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
-    while pagetext.status_code != 200:
-        logger.info(f"sitemap xml url was not reached. Status code {pagetext.status_code}")
-        tryagainquestion = input("try again? \"y\" for new url, \"n\" to exit or \"r\" to repeat:")
-        if tryagainquestion.lower() == "y":
-            sitemapurl()
-        elif tryagainquestion.lower() == "n":
-            logger.info("let's close")
-            sys.exit()
-        elif tryagainquestion.lower() == "r":
-            sitemaplist(url)
-        else:
-            logger.info("please insert y, n or r")
-    data = pagetext.text
-    soup = BeautifulSoup(data, 'xml')
+    soup = BeautifulSoup(content, 'xml')
     for i in soup.find_all('url'):
         link = i.findNext("loc").text
         links.append(link)
-    logger.info(f"The number of url tags in sitemap: {len(links)}")
     if links:
+        logger.info(f"The number of url tags in sitemap: {len(links)}")
         return links
     else:
         logger.info("list of sitemap urls is empty. The xml link must be wrong.")
 
 
-def checker(url: str) -> Tuple[list, list, list, list]:
+def checker(url: str, response_list=[]) -> List:
     """
     follows a provided link
-    and appends to relevant list subject to response
+    and appends to list of (url, response) tuples
     """
-    f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)})
+    f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)}, timeout=(2, 5))
     status = f.status_code
-    if status == 200:
-        list200.append(url)
-    elif status == 404:
-        list404.append(url)
-    elif status == 410:
-        list410.append(url)
-    elif 500 <= status <= 599:
-        server_errors.append(url)
-    return (list200, list404, list410, server_errors)
+    response_list.append((url, status))
+    return response_list
 
 
 def wrapper_checker(checker, q):
