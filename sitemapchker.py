@@ -1,16 +1,19 @@
-# check website sitemap for 200, 404, 410, 500-599 responses; output to txt file
+# check website sitemap for responses; output to stdout or,
+# if selected, txt file according to status
 
-import random
+import itertools as IT
 import logging
-from threading import Thread
-import sys
-from typing import List
 import queue
+import random
+import threading as t
+from typing import List, Dict, Optional, Tuple
+import sys
+
 
 import requests
 from bs4 import BeautifulSoup
 
-log_format = '%(filename)s - %(levelname)s - %(message)s'
+log_format = '%(levelname)s: %(message)s'
 logger = logging.getLogger(__name__)
 logger.setLevel('DEBUG')
 stream = logging.StreamHandler()
@@ -29,8 +32,6 @@ desktop_agents = ['Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML
                   'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36',
                   'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.99 Safari/537.36',
                   'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0']
-# https://kirill-sklyarenko.ru/index.php?option=com_jmap&view=sitemap&format=xml
-# https://perevodzakonov.ru/index.php?option=com_jmap&view=sitemap&format=xml
 
 
 def sitemapurl() -> str:
@@ -42,8 +43,8 @@ def sitemapurl() -> str:
             sys.exit()
         else:
             status = 0
-            if entered_input.startswith("http") and entered_input.endswith("=xml"):
-                f = requests.get(entered_input, headers={'User-Agent': random.choice(desktop_agents)}, timeout=(2, 5))
+            if entered_input.startswith("http") and entered_input.endswith("xml"):
+                f = requests.get(entered_input, headers={'User-Agent': random.choice(desktop_agents)}, timeout=None)
                 status = f.status_code
                 if status == 200:
                     sitemap = f
@@ -68,81 +69,113 @@ def sitemaplist(content: str) -> List:
         logger.info("list of sitemap urls is empty. The xml link must be wrong.")
 
 
-def checker(url: str, response_list=[]) -> List:
-    """
-    follows a provided link
-    and appends to list of (url, response) tuples
-    """
-    f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)}, timeout=(2, 5))
-    status = f.status_code
-    response_list.append((url, status))
-    return response_list
+response_list = []
+requests_exceptions = []
+q = queue.Queue()
 
 
-def wrapper_checker(checker, q):
-    while not q.empty():
-        work = q.get()
-        checker(work)
-        q.task_done()
-
-
-def threads(urls: list) -> None:
-    q = queue.Queue()
-    threads = []
-    for i in urls:
+def q_putter(q, links: List) -> None:
+    """all urls found on xml sitemap are added to the q"""
+    for i in links:
         q.put(i)
-    num_threads = min(40, len(urls))
-    logger.info(f"number of link packages: {num_threads}")
-    for i in enumerate(range(num_threads), 1):
-        logger.info(f"starting package {i[0]}")
-        t = Thread(target=wrapper_checker, args=(checker, q))
-        t.start()
-        threads.append(t)
-    q.join()
+    q.put("END")
 
 
-def results(fourlists: tuple) -> None:
+def checker(url: str) -> Tuple:
     """
-    accepts lists with response urls, shows count
-    writes to txt file in the same folder
+    follows the provided link
+    and makes (url, response status) tuples
     """
-    if fourlists[0]:
-        logger.info(f"found {str(len(fourlists[0]))} good ")
-        logger.info("list of links sent to good links.txt")
-        with open("good links.txt", "w") as f:
-            f.write("\r".join(fourlists[0]))
-    else:
-        logger.info("no 200 pages found")
+    try:
+        f = requests.get(url, headers={'User-Agent': random.choice(desktop_agents)}, timeout=None)
+        status = f.status_code
+        return (url, status)
+    except requests.exceptions.RequestException:
+        exc_type, value, traceback = sys.exc_info()
+        return (url, exc_type.__name__)
 
-    if fourlists[1]:
-        logger.info(f"found {str(len(fourlists[1]))} 404 ")
-        logger.info("list of links sent to 404 links.txt")
-        with open("404 links.txt", "w") as f:
-            f.write("\r".join(fourlists[1]))
-    else:
-        logger.info("no 404 pages found")
 
-    if fourlists[2]:
-        logger.info(f"found {str(len(fourlists[2]))} 410 ")
-        logger.info("list of links sent to 410 links.txt")
-        with open("410 links.txt", "w") as f:
-            f.write("\r".join(fourlists[2]))
-    else:
-        logger.info("no 410 pages found")
+def responselist_maker(response_tuple: Tuple) -> None:
+    response_list.append(response_tuple)
 
-    if fourlists[3]:
-        logger.info(f"found {str(len(fourlists[3]))} server error(s) ")
-        logger.info("list of links sent to server error links.txt")
-        with open("server error links.txt", "w") as f:
-            f.write("\r".join(fourlists[3]))
+
+def checker_wrapper(url, q) -> None:
+    "accepts threads and processes them with 2 funcs"
+    response_tuple = checker(url)
+    responselist_maker(response_tuple)
+    q.task_done()
+
+
+iterator = iter(q.get, 'END')
+
+
+def threads(q, links: List, checker_wrapper) -> None:
+    threads_list = []
+    for i in iter(lambda: list(IT.islice(iterator, 30)), []):
+        for j in i:
+            threader = t.Thread(target=checker_wrapper, args=(j, q))
+            threads_list.append(threader)
+            threader.start()
+    for i, k in enumerate(threads_list, start=1):
+        k.join()
+        print("Progress: ", i, " link of", len(threads_list), end="\r")
+    logger.info("Checked all.")
+
+
+q.join()
+
+
+def ask_for_output() -> Optional[bool]:
+    "ask whether output to file is needed"
+    entered_input = input("""Can make a txt file in the same folder with urls sorted according to status.
+                            Press 'y' to make it or 'n' to exit: """)
+    if entered_input.lower() == 'n':
+        sys.exit()
+    elif entered_input.lower() == 'y':
+        return True
     else:
-        logger.info("no server errors found")
+        logger.info("please, select between offered alternatives")
+        ask_for_output()
+
+
+def created_output(response_list: List) -> Dict:
+    """from list of (url, status) tuples
+        make a dict with statues as key and
+        list of urls as value"""
+    final_output = {}
+    for i in response_list:
+        if i[1] not in final_output.keys():
+            final_output[i[1]] = [(i[0])]
+        else:
+            final_output[i[1]] += [i[0]]
+    return final_output
+
+
+def show_result(final_output: Dict) -> None:
+    "show statuses and number of associated sitemap urls"
+    logger.info("I got the following results:")
+    for key, value in final_output.items():
+        logger.info(f"{key}: {len(value)}")
+
+
+def output_to_file(final_output: Dict) -> None:
+    """create a file in the same dir and
+        write statuses and number of associated sitemap urls"""
+    with open("sitemap_output.txt", 'w') as f:
+        for k, v in final_output.items():
+            f.write('%s\n%s\n\n' % (k, "\n".join(v)))
+    logger.info("I'm out.")
 
 
 def main():
-    sitemap = sitemaplist(sitemapurl())
-    threads(sitemap)
-    results((list200, list404, list410, server_errors))
+    sitemaplink = sitemapurl()
+    urllist = sitemaplist(sitemaplink)
+    q_putter(q, urllist)
+    threads(q, urllist, checker_wrapper)
+    output_dict = created_output(response_list)
+    show_result(output_dict)
+    if ask_for_output() is True:
+        output_to_file(output_dict)
 
 
 if __name__ == '__main__':
